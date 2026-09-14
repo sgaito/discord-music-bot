@@ -1,0 +1,19 @@
+[Unit]
+Description=Discord YouTube music bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/discord-music-bot
+ExecStart=/usr/bin/node src/index.js
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/opt/discord-music-bot/.env
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
