@@ -26,6 +26,7 @@ import { loadConfig } from "./config.js";
 import { MusicManager } from "./player.js";
 import { formatDuration } from "./youtube.js";
 import { resolveQuery } from "./resolve.js";
+import { ensurePlayerEmojis } from "./playerEmojis.js";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(rootDir, "../.env") });
@@ -37,6 +38,8 @@ const music = new MusicManager(config);
 music.onTrackStart = (session, track) => sendNowPlaying(session, track);
 music.onQueueEnd = (session) => clearNowPlaying(session);
 music.onSessionEnd = (session) => clearNowPlaying(session);
+
+let playerEmojis = {};
 
 const commands = [
   new SlashCommandBuilder()
@@ -64,6 +67,12 @@ const client = new Client({
 client.once(Events.ClientReady, async (readyClient) => {
   const rest = new REST({ version: "10" }).setToken(config.token);
   const appId = readyClient.user.id;
+
+  try {
+    playerEmojis = await ensurePlayerEmojis(rest, appId);
+  } catch (err) {
+    console.error("[emojis]", err.message);
+  }
 
   try {
     if (config.guildId) {
@@ -281,20 +290,23 @@ function playerCard(session, track) {
   return { components: [container], flags: MessageFlags.IsComponentsV2 };
 }
 
+function iconButton(customId, style, emojiKey, fallback) {
+  const button = new ButtonBuilder().setCustomId(customId).setStyle(style);
+  if (playerEmojis[emojiKey]) return button.setEmoji(playerEmojis[emojiKey]);
+  return button.setLabel(fallback);
+}
+
 function playerControls(session) {
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("music_shuffle").setLabel("⇄").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("music_prev").setLabel("|<").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId("music_pause")
-        .setLabel(session?.isPaused() ? ">" : "||")
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("music_skip").setLabel(">|").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("music_lista").setLabel("≡").setStyle(ButtonStyle.Secondary),
+      iconButton("music_shuffle", ButtonStyle.Secondary, "shuffle", "↝"),
+      iconButton("music_prev", ButtonStyle.Secondary, "prev", "≪"),
+      iconButton("music_pause", ButtonStyle.Primary, session?.isPaused() ? "play" : "pause", session?.isPaused() ? "▷" : "∥"),
+      iconButton("music_skip", ButtonStyle.Secondary, "skip", "≫"),
+      iconButton("music_lista", ButtonStyle.Secondary, "queue", "☰"),
     ),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("music_stop").setLabel("[]").setStyle(ButtonStyle.Danger),
+      iconButton("music_stop", ButtonStyle.Danger, "stop", "□"),
     ),
   ];
 }
