@@ -41,7 +41,7 @@ music.onSessionEnd = (session) => clearNowPlaying(session);
 const commands = [
   new SlashCommandBuilder()
     .setName("play")
-    .setDescription("Pone un link de YouTube o Spotify")
+    .setDescription("Pone un link de YouTube o Spotify, o busca normal, o pone lo que quieras wachin")
     .addStringOption((option) =>
       option
         .setName("url")
@@ -49,10 +49,10 @@ const commands = [
         .setRequired(true),
     ),
   new SlashCommandBuilder().setName("skip").setDescription("Saltea este tema"),
-  new SlashCommandBuilder().setName("stop").setDescription("Para todo, vacía la cola y se va"),
-  new SlashCommandBuilder().setName("pause").setDescription("Pausa el tema"),
+  new SlashCommandBuilder().setName("stop").setDescription("Para todo, te vacía la cola y se va"),
+  new SlashCommandBuilder().setName("pause").setDescription("Pausa el tema, stop, quieto"),
   new SlashCommandBuilder().setName("resume").setDescription("Sigue con el tema"),
-  new SlashCommandBuilder().setName("queue").setDescription("Qué hay en cola"),
+  new SlashCommandBuilder().setName("queue").setDescription("Qué tenes en la cola (Spoiler: waska)"),
   new SlashCommandBuilder().setName("np").setDescription("Qué está sonando ahora"),
   new SlashCommandBuilder().setName("leave").setDescription("Saca a Gaito del canal de voz"),
 ].map((command) => command.toJSON());
@@ -84,7 +84,7 @@ client.once(Events.ClientReady, async (readyClient) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   if (!interaction.inGuild()) {
-    await interaction.reply({ content: "Esto es para usarlo en un server, no por acá.", ephemeral: true });
+    await interaction.reply({ content: "Que mierda haces? me estas mandando un dm imbécil", ephemeral: true });
     return;
   }
 
@@ -117,7 +117,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   } catch (err) {
     console.error("[command]", err);
-    const message = err.message || "Algo salió mal";
+    const message = err.message || "Se picó todo, exploto error";
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply({ content: message }).catch(() => {});
     } else {
@@ -129,7 +129,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 async function handlePlay(interaction) {
   const voiceChannel = interaction.member.voice.channel;
   if (!voiceChannel || voiceChannel.type === ChannelType.GuildStageVoice) {
-    await interaction.reply({ content: "Entrá a un canal de voz y después pedime el tema.", ephemeral: true });
+    await interaction.reply({ content: "Si no estas en un canal donde mierda queres que ponga, imbécil", ephemeral: true });
     return;
   }
 
@@ -137,14 +137,14 @@ async function handlePlay(interaction) {
   const permissions = voiceChannel.permissionsFor(me);
   if (!permissions?.has(PermissionFlagsBits.Connect) || !permissions?.has(PermissionFlagsBits.Speak)) {
     await interaction.reply({
-      content: "No me dejan entrar o hablar en ese canal de voz.",
+      content: "Liberen al tito wachooo, no me dejan cantar acá",
       ephemeral: true,
     });
     return;
   }
 
   const query = interaction.options.getString("url", true).trim();
-  await interaction.deferReply();
+  await interaction.reply({ content: "Pará que estoy pensando wacho" });
 
   const { playlistTitle, tracks } = await resolveQuery(query, config);
   const session = music.get(interaction.guildId);
@@ -156,7 +156,7 @@ async function handlePlay(interaction) {
   if (wasIdle) {
     const playing = await session.playNext();
     if (!playing) {
-      await interaction.editReply({ content: "No pude poner ninguno de esos temas." });
+      await interaction.editReply({ content: "No pude poner ninguno de esos temas, ni idea pa fijate vo" });
       return;
     }
     await interaction.deleteReply().catch(() => {});
@@ -180,29 +180,29 @@ async function handleSkip(interaction) {
 async function handleStop(interaction) {
   const session = music.guilds.get(interaction.guildId);
   if (!session) {
-    await interaction.reply({ content: "No estoy tocando nada.", ephemeral: true });
+    await interaction.reply({ content: "Me queres sacar y ni siquiera estoy, enfermo.", ephemeral: true });
     return;
   }
   requireSameVoice(interaction);
   session.stop();
-  await interaction.reply({ content: "Chau, apagué todo y me fui.", ephemeral: true });
+  await interaction.reply({ content: "Chaaau nos vimoo", ephemeral: true });
 }
 
 async function handlePause(interaction) {
   const session = requireSameVoice(interaction);
   if (!session.isPlaying()) {
-    await interaction.reply({ content: "No hay nada puesto.", ephemeral: true });
+    await interaction.reply({ content: "Que queres pausar si no hay nada genio", ephemeral: true });
     return;
   }
   session.pause();
   refreshCard(session);
-  await interaction.reply({ content: "Quedó en pausa.", ephemeral: true });
+  await interaction.reply({ content: "Pausé, de nada ahi te paso alias", ephemeral: true });
 }
 
 async function handleResume(interaction) {
   const session = requireSameVoice(interaction);
   if (!session.isPaused()) {
-    await interaction.reply({ content: "No está en pausa.", ephemeral: true });
+    await interaction.reply({ content: "como que resume si esta sonando bott", ephemeral: true });
     return;
   }
   session.resume();
@@ -214,7 +214,7 @@ async function handleQueue(interaction) {
   const session = music.guilds.get(interaction.guildId);
   const embed = queueEmbed(session);
   if (!embed) {
-    await interaction.reply({ content: "No hay nada en cola.", ephemeral: true });
+    await interaction.reply({ content: "No tenes nada en la cola (por ahora)", ephemeral: true });
     return;
   }
   await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -223,11 +223,11 @@ async function handleQueue(interaction) {
 async function handleNowPlaying(interaction) {
   const session = music.guilds.get(interaction.guildId);
   if (!session?.current) {
-    await interaction.reply({ content: "No hay nada puesto.", ephemeral: true });
+    await interaction.reply({ content: "No hay nada puesto wachin", ephemeral: true });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.reply({ content: "Pará que piense wacho", ephemeral: true });
   session.textChannel = interaction.channel;
   await sendNowPlaying(session, session.current);
   await interaction.deleteReply().catch(() => {});
@@ -236,7 +236,7 @@ async function handleNowPlaying(interaction) {
 function requireSameVoice(interaction) {
   const session = music.guilds.get(interaction.guildId);
   if (!session?.connection) {
-    throw new Error("No estoy en ningún canal de voz.");
+    throw new Error("No se que tocas si ni quiera estoy");
   }
   const voiceChannel = interaction.member.voice.channel;
   if (!voiceChannel || voiceChannel.id !== session.connection.joinConfig.channelId) {
@@ -291,7 +291,7 @@ function playerControls(session) {
         .setEmoji(session?.isPaused() ? "▶️" : "⏸️")
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("music_skip").setEmoji("⏭️").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("music_lista").setEmoji("📋").setLabel("Lista").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("music_lista").setEmoji("📋").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("music_stop").setLabel("Parar").setStyle(ButtonStyle.Danger),
@@ -386,7 +386,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const session = music.guilds.get(interaction.guildId);
       const embed = queueEmbed(session);
       if (!embed) {
-        await interaction.reply({ content: "No hay nada en cola.", ephemeral: true });
+        await interaction.reply({ content: "No tenes nada en la cola (por ahora)", ephemeral: true });
         return;
       }
       await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -406,7 +406,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     if (interaction.customId === "music_shuffle") {
       if (!session.shuffle()) {
-        await interaction.reply({ content: "No hay temas suficientes para mezclar.", ephemeral: true });
+        await interaction.reply({ content: "No se que queres que mezcle si no tenes nada puesto.", ephemeral: true });
         return;
       }
       await refreshPlayer(interaction, session);
