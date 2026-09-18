@@ -284,17 +284,17 @@ function playerCard(session, track) {
 function playerControls(session) {
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("music_shuffle").setEmoji("🔀").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("music_prev").setEmoji("⏮️").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("music_shuffle").setLabel("⇄").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("music_prev").setLabel("|<").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId("music_pause")
-        .setEmoji(session?.isPaused() ? "▶️" : "⏸️")
+        .setLabel(session?.isPaused() ? ">" : "||")
         .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("music_skip").setEmoji("⏭️").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("music_lista").setEmoji("📋").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("music_skip").setLabel(">|").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("music_lista").setLabel("≡").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("music_stop").setLabel("Parar").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("music_stop").setLabel("[]").setStyle(ButtonStyle.Danger),
     ),
   ];
 }
