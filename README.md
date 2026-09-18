@@ -75,7 +75,7 @@ SPOTIFY_MARKET=AR
 
 4. Reiniciá el bot.
 
-Acepta tema, playlist, álbum y artista (los más escuchados). Playlists **privadas** no entran con esto: la API sin login de usuario solo ve lo público. Tope de playlist: 50 temas (`MAX_PLAYLIST`).
+Acepta tema, playlist, álbum y artista (los más escuchados). Las playlists públicas las lee por la página embed de Spotify (la API oficial ya no da los temas de playlists ajenas). Playlists **privadas** no entran. Tope: 50 temas (`MAX_PLAYLIST`).
 
 ## Requisitos
 
