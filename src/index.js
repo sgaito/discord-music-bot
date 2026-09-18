@@ -29,6 +29,11 @@ const config = loadConfig();
 assertBinaries(config.ytdlpBin);
 
 const music = new MusicManager(config);
+music.onTrackStart = (session, track) => sendNowPlaying(session, track);
+music.onSessionEnd = (session) => {
+  stopNpTicker(session);
+  session.npMessage = null;
+};
 
 const commands = [
   new SlashCommandBuilder()
@@ -146,20 +151,21 @@ async function handlePlay(interaction) {
   session.enqueue(tracks, interaction.user);
 
   if (wasIdle) {
-    const playing = await session.playNext();
+    const playing = await session.playNext({ announce: false });
     if (!playing) {
       await interaction.editReply({ content: "No pude poner ninguno de esos temas." });
       return;
     }
-    await interaction.editReply({
-      embeds: [trackEmbed(playing, playlistTitle, tracks.length, true)],
-      components: controls(),
+    const message = await interaction.editReply({
+      embeds: [playerEmbed(session, playing, playlistNote(playlistTitle, tracks.length))],
+      components: playerControls(session),
     });
+    attachNowPlaying(session, message);
     return;
   }
 
   await interaction.editReply({
-    embeds: [trackEmbed(tracks[0], playlistTitle, tracks.length, false)],
+    embeds: [queuedEmbed(tracks[0], playlistNote(playlistTitle, tracks.length))],
   });
 }
 
@@ -205,30 +211,12 @@ async function handleResume(interaction) {
 
 async function handleQueue(interaction) {
   const session = music.guilds.get(interaction.guildId);
-  if (!session?.current && !(session?.queue.length)) {
+  const embed = queueEmbed(session);
+  if (!embed) {
     await interaction.reply({ content: "No hay nada en cola.", ephemeral: true });
     return;
   }
-
-  const lines = [];
-  if (session.current) {
-    lines.push(`**Sonando:** ${session.current.title} \`${formatDuration(session.current.duration)}\``);
-  }
-  session.queue.slice(0, 10).forEach((track, index) => {
-    lines.push(`\`${index + 1}.\` ${track.title} \`${formatDuration(track.duration)}\``);
-  });
-  if (session.queue.length > 10) {
-    lines.push(`… y ${session.queue.length - 10} más`);
-  }
-
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setColor(0xff0000)
-        .setTitle("En cola")
-        .setDescription(lines.join("\n")),
-    ],
-  });
+  await interaction.reply({ embeds: [embed] });
 }
 
 async function handleNowPlaying(interaction) {
@@ -238,9 +226,10 @@ async function handleNowPlaying(interaction) {
     return;
   }
   await interaction.reply({
-    embeds: [trackEmbed(session.current, null, 1, true)],
-    components: controls(),
+    embeds: [playerEmbed(session, session.current)],
+    components: playerControls(session),
   });
+  attachNowPlaying(session, await interaction.fetchReply());
 }
 
 function requireSameVoice(interaction) {
@@ -255,65 +244,197 @@ function requireSameVoice(interaction) {
   return session;
 }
 
-function trackEmbed(track, playlistTitle, count, nowPlaying) {
+function playlistNote(playlistTitle, count) {
+  if (playlistTitle && count > 1) return `${playlistTitle} · ${count} temas`;
+  if (count > 1) return `Metí ${count} temas`;
+  return null;
+}
+
+function playerEmbed(session, track, note) {
+  const total = track.duration ? formatDuration(track.duration) : "en vivo";
   const embed = new EmbedBuilder()
     .setColor(0xff0000)
-    .setTitle(nowPlaying ? "Sonando" : "A la cola")
+    .setTitle(track.title)
+    .setDescription(
+      `${track.uploader || "YouTube"}\n\`${formatDuration(session?.position() ?? 0)} / ${total}\``,
+    );
+
+  if (track.url) embed.setURL(track.url);
+  if (track.thumbnail) embed.setImage(track.thumbnail);
+
+  const footer = [];
+  if (note) footer.push(note);
+  if (session?.queue.length) footer.push(`${session.queue.length} en cola`);
+  const who = track.requestedBy;
+  if (who) footer.push(`Pidió ${who.displayName || who.username || who}`);
+  if (footer.length) embed.setFooter({ text: footer.join(" · ") });
+
+  return embed;
+}
+
+function playerControls(session) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("music_shuffle").setEmoji("🔀").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("music_prev").setEmoji("⏮️").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("music_pause")
+        .setEmoji(session?.isPaused() ? "▶️" : "⏸️")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("music_skip").setEmoji("⏭️").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("music_lista").setEmoji("📋").setLabel("Lista").setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("music_stop").setLabel("Parar").setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+async function sendNowPlaying(session, track) {
+  stopNpTicker(session);
+  const previous = session.npMessage;
+  session.npMessage = null;
+  previous?.edit({ components: [] }).catch(() => {});
+
+  if (!session.textChannel) return;
+  try {
+    const message = await session.textChannel.send({
+      embeds: [playerEmbed(session, track)],
+      components: playerControls(session),
+    });
+    attachNowPlaying(session, message);
+  } catch (err) {
+    console.error("[nowplaying]", err);
+  }
+}
+
+function attachNowPlaying(session, message) {
+  stopNpTicker(session);
+  session.npMessage = message;
+  if (!message) return;
+
+  session.npTimer = setInterval(() => {
+    if (session.dead || !session.current || session.npMessage !== message) {
+      stopNpTicker(session);
+      return;
+    }
+    message
+      .edit({
+        embeds: [playerEmbed(session, session.current)],
+        components: playerControls(session),
+      })
+      .catch(() => stopNpTicker(session));
+  }, 10_000);
+}
+
+function stopNpTicker(session) {
+  if (session?.npTimer) {
+    clearInterval(session.npTimer);
+    session.npTimer = null;
+  }
+}
+
+function queuedEmbed(track, note) {
+  const embed = new EmbedBuilder()
+    .setColor(0xff0000)
+    .setTitle("A la cola")
     .setDescription(track.url ? `[${track.title}](${track.url})` : track.title)
     .addFields(
-      { name: "Duración", value: formatDuration(track.duration), inline: true },
+      { name: "Duración", value: track.duration ? formatDuration(track.duration) : "en vivo", inline: true },
       { name: "Canal", value: track.uploader || "YouTube", inline: true },
     );
 
   if (track.thumbnail) embed.setThumbnail(track.thumbnail);
-  if (playlistTitle && count > 1) {
-    embed.setFooter({ text: `${playlistTitle} · ${count} temas` });
-  } else if (count > 1) {
-    embed.setFooter({ text: `Metí ${count} temas` });
-  }
+  if (note) embed.setFooter({ text: note });
   return embed;
 }
 
-function controls() {
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("music_pause").setLabel("Pausa").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("music_skip").setLabel("Saltear").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("music_stop").setLabel("Parar").setStyle(ButtonStyle.Danger),
-    ),
-  ];
+function queueEmbed(session) {
+  if (!session?.current && !(session?.queue.length)) return null;
+
+  const lines = [];
+  if (session.current) {
+    lines.push(`**Sonando:** ${session.current.title} \`${formatDuration(session.current.duration)}\``);
+  }
+  session.queue.slice(0, 10).forEach((track, index) => {
+    lines.push(`\`${index + 1}.\` ${track.title} \`${formatDuration(track.duration)}\``);
+  });
+  if (session.queue.length > 10) {
+    lines.push(`… y ${session.queue.length - 10} más`);
+  }
+
+  return new EmbedBuilder()
+    .setColor(0xff0000)
+    .setTitle("En cola")
+    .setDescription(lines.join("\n"));
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton() || !interaction.customId.startsWith("music_")) return;
 
   try {
+    if (interaction.customId === "music_lista") {
+      const session = music.guilds.get(interaction.guildId);
+      const embed = queueEmbed(session);
+      if (!embed) {
+        await interaction.reply({ content: "No hay nada en cola.", ephemeral: true });
+        return;
+      }
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+      return;
+    }
+
+    const session = requireSameVoice(interaction);
+
     if (interaction.customId === "music_pause") {
-      const session = requireSameVoice(interaction);
       if (session.isPaused()) {
         session.resume();
-        await interaction.reply({ content: "Dale, sigo.", ephemeral: true });
       } else {
         session.pause();
-        await interaction.reply({ content: "Quedó en pausa.", ephemeral: true });
       }
+      await refreshPlayer(interaction, session);
+      return;
+    }
+    if (interaction.customId === "music_shuffle") {
+      if (!session.shuffle()) {
+        await interaction.reply({ content: "No hay temas suficientes para mezclar.", ephemeral: true });
+        return;
+      }
+      await refreshPlayer(interaction, session);
+      return;
+    }
+    if (interaction.customId === "music_prev") {
+      if (!session.previous()) {
+        await interaction.reply({ content: "No hay nada antes de este tema.", ephemeral: true });
+        return;
+      }
+      await interaction.deferUpdate();
       return;
     }
     if (interaction.customId === "music_skip") {
-      const session = requireSameVoice(interaction);
       session.skip();
-      await interaction.reply({ content: "Listo, siguiente.", ephemeral: true });
+      await interaction.deferUpdate();
       return;
     }
     if (interaction.customId === "music_stop") {
-      const session = requireSameVoice(interaction);
       session.stop();
-      await interaction.reply({ content: "Corté todo.", ephemeral: true });
+      await interaction.update({ content: "Corté todo.", embeds: [], components: [] });
     }
   } catch (err) {
     await interaction.reply({ content: err.message || "No pude.", ephemeral: true }).catch(() => {});
   }
 });
+
+async function refreshPlayer(interaction, session) {
+  if (!session.current) {
+    await interaction.deferUpdate();
+    return;
+  }
+  await interaction.update({
+    embeds: [playerEmbed(session, session.current)],
+    components: playerControls(session),
+  });
+}
 
 function assertBinaries(ytdlpBin) {
   try {

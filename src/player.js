@@ -14,12 +14,18 @@ export class MusicManager {
   constructor(config) {
     this.config = config;
     this.guilds = new Map();
+    this.onTrackStart = null;
+    this.onSessionEnd = null;
   }
 
   get(guildId) {
     let session = this.guilds.get(guildId);
     if (!session || session.dead) {
-      session = new GuildSession(guildId, this.config, () => this.guilds.delete(guildId));
+      session = new GuildSession(guildId, this.config, () => {
+        this.guilds.delete(guildId);
+        this.onSessionEnd?.(session);
+      });
+      session.onTrackStart = (track) => this.onTrackStart?.(session, track);
       this.guilds.set(guildId, session);
     }
     return session;
@@ -38,20 +44,26 @@ class GuildSession {
     this.config = config;
     this.onDestroy = onDestroy;
     this.queue = [];
+    this.history = [];
     this.current = null;
+    this.resource = null;
     this.connection = null;
     this.cleanupStream = null;
     this.idleTimer = null;
     this.textChannel = null;
     this.starting = false;
     this.dead = false;
+    this.skipHistory = false;
+    this.onTrackStart = null;
+    this.npMessage = null;
+    this.npTimer = null;
 
     this.player = createAudioPlayer({
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
 
     this.player.on("stateChange", (oldState, newState) => {
-      if (oldState.status === AudioPlayerStatus.Playing && newState.status === AudioPlayerStatus.Idle) {
+      if (newState.status === AudioPlayerStatus.Idle && oldState.status !== AudioPlayerStatus.Idle) {
         this.playNext().catch(async (err) => {
           console.error("[player]", err);
           this.textChannel?.send(`Se me trabó este tema: ${err.message}`).catch(() => {});
@@ -114,12 +126,19 @@ class GuildSession {
     return items;
   }
 
-  async playNext() {
+  async playNext({ announce = true } = {}) {
     if (this.dead || this.starting) return this.current;
     this.starting = true;
 
     try {
       this.stopStream();
+
+      const finished = this.current;
+      if (finished && !this.skipHistory) {
+        this.history.push(finished);
+        if (this.history.length > 50) this.history.shift();
+      }
+      this.skipHistory = false;
 
       while (!this.dead) {
         this.current = this.queue.shift() || null;
@@ -146,8 +165,16 @@ class GuildSession {
           inputType: StreamType.Raw,
           metadata: this.current,
         });
+        this.resource = resource;
         this.player.play(resource);
         await entersState(this.player, AudioPlayerStatus.Playing, 20_000);
+        if (announce) {
+          try {
+            await this.onTrackStart?.(this.current);
+          } catch (err) {
+            console.error("[nowplaying]", err);
+          }
+        }
         return this.current;
       }
 
@@ -161,13 +188,50 @@ class GuildSession {
     if (!this.current && this.queue.length === 0) {
       return false;
     }
-    this.player.stop(true);
+    this.advance();
     return true;
+  }
+
+  previous() {
+    if (!this.history.length) {
+      return false;
+    }
+    const earlier = this.history.pop();
+    if (this.current) this.queue.unshift(this.current);
+    this.queue.unshift(earlier);
+    this.skipHistory = true;
+    this.advance();
+    return true;
+  }
+
+  shuffle() {
+    if (this.queue.length < 2) {
+      return false;
+    }
+    for (let i = this.queue.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
+    }
+    return true;
+  }
+
+  position() {
+    return Math.floor((this.resource?.playbackDuration || 0) / 1000);
+  }
+
+  advance() {
+    if (this.player.state.status === AudioPlayerStatus.Idle) {
+      this.playNext().catch((err) => console.error("[player]", err));
+    } else {
+      this.player.stop(true);
+    }
   }
 
   stop() {
     this.queue = [];
+    this.history = [];
     this.current = null;
+    this.resource = null;
     this.player.stop(true);
     this.stopStream();
     this.destroy();
@@ -214,7 +278,9 @@ class GuildSession {
     this.clearIdle();
     this.stopStream();
     this.queue = [];
+    this.history = [];
     this.current = null;
+    this.resource = null;
     try {
       this.player.stop(true);
     } catch {
