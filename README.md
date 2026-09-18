@@ -57,7 +57,9 @@ Intents privilegiados: no hace falta ninguno.
 | `/np` | Lo que está sonando |
 | `/stop` o `/leave` | Para todo y se va del canal |
 
-También hay botones de pausa / skip / stop en el mensaje de “Reproduciendo”.
+Mientras suena algo, el bot mantiene **una sola tarjeta de reproductor** en el canal: carátula, tema, artista y el tiempo (se actualiza cada 10 segundos). Al cambiar de tema borra la anterior y manda la nueva, así el chat no se llena.
+
+Botones de la tarjeta: mezclar, anterior, pausa/seguir, siguiente, **Lista** (la cola, solo la ve quien la pide) y **Parar**.
 
 Se va solo a los 3 minutos de cola vacía.
 

@@ -15,6 +15,7 @@ export class MusicManager {
     this.config = config;
     this.guilds = new Map();
     this.onTrackStart = null;
+    this.onQueueEnd = null;
     this.onSessionEnd = null;
   }
 
@@ -26,6 +27,7 @@ export class MusicManager {
         this.onSessionEnd?.(session);
       });
       session.onTrackStart = (track) => this.onTrackStart?.(session, track);
+      session.onQueueEnd = () => this.onQueueEnd?.(session);
       this.guilds.set(guildId, session);
     }
     return session;
@@ -55,6 +57,7 @@ class GuildSession {
     this.dead = false;
     this.skipHistory = false;
     this.onTrackStart = null;
+    this.onQueueEnd = null;
     this.npMessage = null;
     this.npTimer = null;
 
@@ -144,6 +147,11 @@ class GuildSession {
         this.current = this.queue.shift() || null;
         if (!this.current) {
           this.startIdle();
+          try {
+            await this.onQueueEnd?.();
+          } catch (err) {
+            console.error("[nowplaying]", err);
+          }
           return null;
         }
 

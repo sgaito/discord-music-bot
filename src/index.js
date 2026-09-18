@@ -8,13 +8,18 @@ import {
   ButtonStyle,
   ChannelType,
   Client,
+  ContainerBuilder,
   EmbedBuilder,
   Events,
   GatewayIntentBits,
+  MediaGalleryBuilder,
+  MessageFlags,
   PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
+  TextDisplayBuilder,
+  escapeMarkdown,
 } from "discord.js";
 import dotenv from "dotenv";
 import { loadConfig } from "./config.js";
@@ -30,10 +35,8 @@ assertBinaries(config.ytdlpBin);
 
 const music = new MusicManager(config);
 music.onTrackStart = (session, track) => sendNowPlaying(session, track);
-music.onSessionEnd = (session) => {
-  stopNpTicker(session);
-  session.npMessage = null;
-};
+music.onQueueEnd = (session) => clearNowPlaying(session);
+music.onSessionEnd = (session) => clearNowPlaying(session);
 
 const commands = [
   new SlashCommandBuilder()
@@ -151,16 +154,12 @@ async function handlePlay(interaction) {
   session.enqueue(tracks, interaction.user);
 
   if (wasIdle) {
-    const playing = await session.playNext({ announce: false });
+    const playing = await session.playNext();
     if (!playing) {
       await interaction.editReply({ content: "No pude poner ninguno de esos temas." });
       return;
     }
-    const message = await interaction.editReply({
-      embeds: [playerEmbed(session, playing, playlistNote(playlistTitle, tracks.length))],
-      components: playerControls(session),
-    });
-    attachNowPlaying(session, message);
+    await interaction.deleteReply().catch(() => {});
     return;
   }
 
@@ -175,7 +174,7 @@ async function handleSkip(interaction) {
     await interaction.reply({ content: "No hay nada para saltear.", ephemeral: true });
     return;
   }
-  await interaction.reply("Listo, siguiente.");
+  await interaction.reply({ content: "Listo, siguiente.", ephemeral: true });
 }
 
 async function handleStop(interaction) {
@@ -186,7 +185,7 @@ async function handleStop(interaction) {
   }
   requireSameVoice(interaction);
   session.stop();
-  await interaction.reply("Chau, apagué todo y me fui.");
+  await interaction.reply({ content: "Chau, apagué todo y me fui.", ephemeral: true });
 }
 
 async function handlePause(interaction) {
@@ -196,7 +195,8 @@ async function handlePause(interaction) {
     return;
   }
   session.pause();
-  await interaction.reply("Quedó en pausa.");
+  refreshCard(session);
+  await interaction.reply({ content: "Quedó en pausa.", ephemeral: true });
 }
 
 async function handleResume(interaction) {
@@ -206,7 +206,8 @@ async function handleResume(interaction) {
     return;
   }
   session.resume();
-  await interaction.reply("Dale, sigo.");
+  refreshCard(session);
+  await interaction.reply({ content: "Dale, sigo.", ephemeral: true });
 }
 
 async function handleQueue(interaction) {
@@ -216,7 +217,7 @@ async function handleQueue(interaction) {
     await interaction.reply({ content: "No hay nada en cola.", ephemeral: true });
     return;
   }
-  await interaction.reply({ embeds: [embed] });
+  await interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
 async function handleNowPlaying(interaction) {
@@ -225,11 +226,11 @@ async function handleNowPlaying(interaction) {
     await interaction.reply({ content: "No hay nada puesto.", ephemeral: true });
     return;
   }
-  await interaction.reply({
-    embeds: [playerEmbed(session, session.current)],
-    components: playerControls(session),
-  });
-  attachNowPlaying(session, await interaction.fetchReply());
+
+  await interaction.deferReply({ ephemeral: true });
+  session.textChannel = interaction.channel;
+  await sendNowPlaying(session, session.current);
+  await interaction.deleteReply().catch(() => {});
 }
 
 function requireSameVoice(interaction) {
@@ -250,26 +251,34 @@ function playlistNote(playlistTitle, count) {
   return null;
 }
 
-function playerEmbed(session, track, note) {
-  const total = track.duration ? formatDuration(track.duration) : "en vivo";
-  const embed = new EmbedBuilder()
-    .setColor(0xff0000)
-    .setTitle(track.title)
-    .setDescription(
-      `${track.uploader || "YouTube"}\n\`${formatDuration(session?.position() ?? 0)} / ${total}\``,
+function playerCard(session, track) {
+  const container = new ContainerBuilder().setAccentColor(0xff0000);
+
+  if (track.thumbnail) {
+    container.addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems({ media: { url: track.thumbnail } }),
     );
+  }
 
-  if (track.url) embed.setURL(track.url);
-  if (track.thumbnail) embed.setImage(track.thumbnail);
+  const total = track.duration ? formatDuration(track.duration) : "en vivo";
+  const lines = [
+    `**${escapeMarkdown(track.title)}**`,
+    escapeMarkdown(track.uploader || "YouTube"),
+    `\`${formatDuration(session?.position() ?? 0)} / ${total}\``,
+  ];
 
-  const footer = [];
-  if (note) footer.push(note);
-  if (session?.queue.length) footer.push(`${session.queue.length} en cola`);
+  const extra = [];
+  if (session?.queue.length) extra.push(`${session.queue.length} en cola`);
   const who = track.requestedBy;
-  if (who) footer.push(`Pidió ${who.displayName || who.username || who}`);
-  if (footer.length) embed.setFooter({ text: footer.join(" · ") });
+  if (who) extra.push(`pidió ${escapeMarkdown(who.displayName || who.username || String(who))}`);
+  if (extra.length) lines.push(`-# ${extra.join(" · ")}`);
 
-  return embed;
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join("\n")));
+  for (const row of playerControls(session)) {
+    container.addActionRowComponents(row);
+  }
+
+  return { components: [container], flags: MessageFlags.IsComponentsV2 };
 }
 
 function playerControls(session) {
@@ -291,39 +300,34 @@ function playerControls(session) {
 }
 
 async function sendNowPlaying(session, track) {
-  stopNpTicker(session);
-  const previous = session.npMessage;
-  session.npMessage = null;
-  previous?.edit({ components: [] }).catch(() => {});
-
+  clearNowPlaying(session);
   if (!session.textChannel) return;
+
   try {
-    const message = await session.textChannel.send({
-      embeds: [playerEmbed(session, track)],
-      components: playerControls(session),
-    });
-    attachNowPlaying(session, message);
+    const message = await session.textChannel.send(playerCard(session, track));
+    session.npMessage = message;
+    startNpTicker(session, message);
   } catch (err) {
     console.error("[nowplaying]", err);
   }
 }
 
-function attachNowPlaying(session, message) {
+function clearNowPlaying(session) {
+  if (!session) return;
   stopNpTicker(session);
-  session.npMessage = message;
-  if (!message) return;
+  const message = session.npMessage;
+  session.npMessage = null;
+  message?.delete().catch(() => {});
+}
 
+function startNpTicker(session, message) {
+  stopNpTicker(session);
   session.npTimer = setInterval(() => {
     if (session.dead || !session.current || session.npMessage !== message) {
       stopNpTicker(session);
       return;
     }
-    message
-      .edit({
-        embeds: [playerEmbed(session, session.current)],
-        components: playerControls(session),
-      })
-      .catch(() => stopNpTicker(session));
+    message.edit(playerCard(session, session.current)).catch(() => stopNpTicker(session));
   }, 10_000);
 }
 
@@ -332,6 +336,11 @@ function stopNpTicker(session) {
     clearInterval(session.npTimer);
     session.npTimer = null;
   }
+}
+
+function refreshCard(session) {
+  if (!session?.npMessage || !session.current) return;
+  session.npMessage.edit(playerCard(session, session.current)).catch(() => {});
 }
 
 function queuedEmbed(track, note) {
@@ -404,21 +413,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
     if (interaction.customId === "music_prev") {
-      if (!session.previous()) {
+      if (!session.history.length) {
         await interaction.reply({ content: "No hay nada antes de este tema.", ephemeral: true });
         return;
       }
-      await interaction.deferUpdate();
+      await interaction.deferUpdate().catch(() => {});
+      session.previous();
       return;
     }
     if (interaction.customId === "music_skip") {
+      await interaction.deferUpdate().catch(() => {});
       session.skip();
-      await interaction.deferUpdate();
       return;
     }
     if (interaction.customId === "music_stop") {
+      await interaction.reply({ content: "Corté todo.", ephemeral: true });
       session.stop();
-      await interaction.update({ content: "Corté todo.", embeds: [], components: [] });
     }
   } catch (err) {
     await interaction.reply({ content: err.message || "No pude.", ephemeral: true }).catch(() => {});
@@ -430,10 +440,7 @@ async function refreshPlayer(interaction, session) {
     await interaction.deferUpdate();
     return;
   }
-  await interaction.update({
-    embeds: [playerEmbed(session, session.current)],
-    components: playerControls(session),
-  });
+  await interaction.update(playerCard(session, session.current));
 }
 
 function assertBinaries(ytdlpBin) {
