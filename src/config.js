@@ -27,6 +27,12 @@ function resolveYtdlp(explicit) {
   return explicit || "yt-dlp";
 }
 
+function optional(name) {
+  const value = process.env[name]?.trim();
+  if (!value || value.includes("poné_")) return null;
+  return value;
+}
+
 export function loadConfig() {
   const cookies = process.env.YTDLP_COOKIES?.trim();
   const cookiesFile = cookies ? resolve(cookies) : null;
@@ -45,5 +51,8 @@ export function loadConfig() {
     ytdlpBin: resolveYtdlp(process.env.YTDLP_BIN?.trim()),
     idleTimeoutMs: Number(process.env.IDLE_TIMEOUT_MS || 180_000),
     maxPlaylist: Number(process.env.MAX_PLAYLIST || 50),
+    spotifyClientId: optional("SPOTIFY_CLIENT_ID"),
+    spotifyClientSecret: optional("SPOTIFY_CLIENT_SECRET"),
+    spotifyMarket: optional("SPOTIFY_MARKET") || "AR",
   };
 }

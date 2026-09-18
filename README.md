@@ -1,6 +1,6 @@
 # discord-music-bot
 
-Bot chico de Discord para un server personal. Reproduce **enlaces de YouTube** (video, Shorts, live, playlist, music.youtube.com). No busca en SoundCloud ni en otros sitios: si le pasás un link de YouTube, usa ese link.
+Bot chico de Discord para un server personal. Reproduce **enlaces de YouTube** (video, Shorts, live, playlist, music.youtube.com) y **links de Spotify** (tema, playlist, álbum, artista). El audio de Spotify no sale de Spotify: el bot lee el nombre y lo busca en YouTube.
 
 ## Dónde va el token
 
@@ -50,7 +50,7 @@ Intents privilegiados: no hace falta ninguno.
 
 | Comando | Qué hace |
 | --- | --- |
-| `/play url:` | Reproduce el enlace de YouTube. Si no es un link, busca **en YouTube** |
+| `/play url:` | Reproduce YouTube o Spotify. Si no es un link, busca **en YouTube** |
 | `/skip` | Salta el tema |
 | `/pause` / `/resume` | Pausa o sigue |
 | `/queue` | Muestra la cola |
@@ -60,6 +60,22 @@ Intents privilegiados: no hace falta ninguno.
 También hay botones de pausa / skip / stop en el mensaje de “Reproduciendo”.
 
 Se va solo a los 3 minutos de cola vacía.
+
+## Spotify
+
+1. Entrá a [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) e iniciá sesión.
+2. **Create app**. Nombre el que quieras. Redirect URI: `http://127.0.0.1:8888/callback` (Spotify no acepta `localhost`). No hace falta login de usuario.
+3. Copiá **Client ID** y **Client Secret** al `.env`:
+
+```
+SPOTIFY_CLIENT_ID=...
+SPOTIFY_CLIENT_SECRET=...
+SPOTIFY_MARKET=AR
+```
+
+4. Reiniciá el bot.
+
+Acepta tema, playlist, álbum y artista (los más escuchados). Playlists **privadas** no entran con esto: la API sin login de usuario solo ve lo público. Tope de playlist: 50 temas (`MAX_PLAYLIST`).
 
 ## Requisitos
 

@@ -8,7 +8,7 @@ import {
   entersState,
   joinVoiceChannel,
 } from "@discordjs/voice";
-import { streamYouTube } from "./youtube.js";
+import { isYouTubeUrl, resolveYouTube, streamYouTube } from "./youtube.js";
 
 export class MusicManager {
   constructor(config) {
@@ -54,7 +54,7 @@ class GuildSession {
       if (oldState.status === AudioPlayerStatus.Playing && newState.status === AudioPlayerStatus.Idle) {
         this.playNext().catch(async (err) => {
           console.error("[player]", err);
-          this.textChannel?.send(`No pude reproducir eso: ${err.message}`).catch(() => {});
+          this.textChannel?.send(`Se me trabó este tema: ${err.message}`).catch(() => {});
           this.playNext().catch((nextErr) => console.error("[player]", nextErr));
         });
       }
@@ -120,24 +120,38 @@ class GuildSession {
 
     try {
       this.stopStream();
-      this.current = this.queue.shift() || null;
 
-      if (!this.current) {
-        this.startIdle();
-        return null;
+      while (!this.dead) {
+        this.current = this.queue.shift() || null;
+        if (!this.current) {
+          this.startIdle();
+          return null;
+        }
+
+        this.clearIdle();
+        try {
+          this.current = await resolveForPlayback(this.current, this.config);
+        } catch (err) {
+          console.error("[player]", err);
+          this.textChannel
+            ?.send(`No encontré "${this.current.title}" en YouTube, paso al siguiente.`)
+            .catch(() => {});
+          continue;
+        }
+
+        const { stream, cleanup } = streamYouTube(this.current.url, this.config);
+        this.cleanupStream = cleanup;
+
+        const resource = createAudioResource(stream, {
+          inputType: StreamType.Raw,
+          metadata: this.current,
+        });
+        this.player.play(resource);
+        await entersState(this.player, AudioPlayerStatus.Playing, 20_000);
+        return this.current;
       }
 
-      this.clearIdle();
-      const { stream, cleanup } = streamYouTube(this.current.url, this.config);
-      this.cleanupStream = cleanup;
-
-      const resource = createAudioResource(stream, {
-        inputType: StreamType.Raw,
-        metadata: this.current,
-      });
-      this.player.play(resource);
-      await entersState(this.player, AudioPlayerStatus.Playing, 20_000);
-      return this.current;
+      return null;
     } finally {
       this.starting = false;
     }
@@ -217,4 +231,31 @@ class GuildSession {
     }
     this.onDestroy();
   }
+}
+
+async function resolveForPlayback(track, config) {
+  if (track.url && isYouTubeUrl(track.url) && !track.youtubeQuery) {
+    return track;
+  }
+
+  const query = track.youtubeQuery || track.title;
+  if (!query) {
+    throw new Error("No encontré ese tema en YouTube");
+  }
+
+  const { tracks } = await resolveYouTube(query, config);
+  const yt = tracks[0];
+  if (!yt?.url) {
+    throw new Error(`No encontré "${track.title}" en YouTube`);
+  }
+
+  return {
+    ...yt,
+    title: track.title || yt.title,
+    uploader: track.uploader || yt.uploader,
+    thumbnail: track.thumbnail || yt.thumbnail,
+    duration: track.duration || yt.duration,
+    requestedBy: track.requestedBy,
+    url: yt.url,
+  };
 }

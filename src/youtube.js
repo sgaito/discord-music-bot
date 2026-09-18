@@ -41,7 +41,7 @@ function runYtdlp(bin, args, timeoutMs = 45_000) {
     let stderr = "";
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      reject(new Error("YouTube tardó demasiado en responder"));
+      reject(new Error("YouTube tardó una banda, lo dejé"));
     }, timeoutMs);
 
     child.stdout.setEncoding("utf8");
@@ -74,19 +74,19 @@ function runYtdlp(bin, args, timeoutMs = 45_000) {
 function friendlyYtdlpError(stderr) {
   const text = stderr.toLowerCase();
   if (text.includes("sign in") || text.includes("confirm you’re not a bot") || text.includes("not a bot")) {
-    return "YouTube bloqueó el VPS. Exportá cookies del navegador a cookies.txt y poné YTDLP_COOKIES en el .env";
+    return "YouTube me bloqueó el VPS. Hay que poner cookies en el .env";
   }
   if (text.includes("private video") || text.includes("private")) {
     return "Ese video es privado";
   }
   if (text.includes("age") && text.includes("restrict")) {
-    return "Ese video tiene restricción de edad. Probá con cookies de una cuenta logueada";
+    return "Ese video pide edad. Probá con cookies de una cuenta logueada";
   }
   if (text.includes("unavailable") || text.includes("not available")) {
     return "Ese video no está disponible";
   }
   const firstLine = stderr.split("\n").map((l) => l.trim()).find(Boolean);
-  return firstLine || "No pude leer ese enlace de YouTube";
+  return firstLine || "No pude leer ese link";
 }
 
 function toTrack(entry, fallbackUrl) {
@@ -110,7 +110,7 @@ function toTrack(entry, fallbackUrl) {
 export async function resolveYouTube(input, { ytdlpBin, cookiesFile, maxPlaylist }) {
   const query = input.trim();
   if (!query) {
-    throw new Error("Pasame un enlace de YouTube");
+    throw new Error("Pasame un link de YouTube");
   }
 
   const args = [...cookieArgs(cookiesFile), "--no-warnings", "--skip-download", "-J", "--ignore-no-formats-error"];
@@ -122,7 +122,7 @@ export async function resolveYouTube(input, { ytdlpBin, cookiesFile, maxPlaylist
       args.push("--no-playlist", "--no-flat-playlist", query);
     }
   } else if (/^https?:\/\//i.test(query)) {
-    throw new Error("Solo reproduzco enlaces de YouTube (youtube.com / youtu.be / music.youtube.com)");
+    throw new Error("Solo pongo YouTube o Spotify");
   } else {
     args.push("--no-playlist", `ytsearch1:${query}`);
   }
@@ -132,13 +132,13 @@ export async function resolveYouTube(input, { ytdlpBin, cookiesFile, maxPlaylist
   try {
     data = JSON.parse(raw);
   } catch {
-    throw new Error("YouTube devolvió una respuesta inválida");
+    throw new Error("YouTube me mandó cualquiera, no pude leerlo");
   }
 
   if (data._type === "playlist") {
     const entries = (data.entries || []).filter(Boolean);
     if (!entries.length) {
-      throw new Error("Esa playlist está vacía o no la pude leer");
+      throw new Error("Esa playlist está vacía o no la pude abrir");
     }
 
     const fromSearch = !isYouTubeUrl(query) || String(data.extractor || "").includes("search");
